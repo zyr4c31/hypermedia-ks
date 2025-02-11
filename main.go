@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -10,12 +11,36 @@ import (
 	"time"
 )
 
-var Mon bool
-
 type Signal struct {
-	User    string `json:"user"`
 	Input   bool   `json:"input"`
 	Message string `json:"message"`
+}
+
+type Message struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
+type Request struct {
+	Model    string    `json:"model"`
+	Messages []Message `json:"messages"`
+}
+
+type Response struct {
+	Model     string    `json:"model"`
+	CreatedAt time.Time `json:"created_at"`
+	Message   struct {
+		Role    string `json:"role"`
+		Content string `json:"content"`
+	} `json:"message"`
+	DoneReason         string `json:"done_reason"`
+	Done               bool   `json:"done"`
+	TotalDuration      int    `json:"total_duration"`
+	LoadDuration       int    `json:"load_duration"`
+	PromptEvalCount    int    `json:"prompt_eval_count"`
+	PromptEvalDuration int    `json:"prompt_eval_duration"`
+	EvalCount          int    `json:"eval_count"`
+	EvalDuration       int    `json:"eval_duration"`
 }
 
 func main() {
@@ -64,7 +89,7 @@ func main() {
 		}
 	})
 
-	aiResponse := make(chan string)
+	aiResponse := make(chan string, 1)
 	var aiMessages []string
 
 	sm.HandleFunc("GET /messages", func(w http.ResponseWriter, r *http.Request) {
@@ -82,40 +107,73 @@ func main() {
 				return
 			case <-aiResponse:
 				for response := range aiResponse {
+					fmt.Printf("response: %v\n", response)
 					aiMessages = append(aiMessages, response)
 
 					w.Write([]byte("event: datastar-merge-signals\n"))
 					w.Write([]byte("retry: 1000\n"))
-					w.Write([]byte(fmt.Sprintf(`data: signals {messages: %v}`, aiMessages)))
+					w.Write([]byte(fmt.Sprintf(`data: signals {messages: %v}`, response)))
 					w.Write([]byte("\n\n\n"))
 					flusher.Flush()
 				}
 			}
 		}
-
 	})
 
-	type Message struct {
-		Role    string `json:"role"`
-		Content string `json:"content"`
-	}
-
-	type Request struct {
-		Model    string    `json:"model"`
-		Messages []Message `json:"messages"`
-	}
-
 	sm.HandleFunc("POST /chat", func(w http.ResponseWriter, r *http.Request) {
-		body, _ := io.ReadAll(r.Body)
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		w.Header().Set("Content-Type", "text/event-stream")
+
+		flusher := w.(http.Flusher)
+
+		reqBody, _ := io.ReadAll(r.Body)
 		defer r.Body.Close()
 		var postBody Signal
 
-		json.Unmarshal(body, &postBody)
+		json.Unmarshal(reqBody, &postBody)
 
-		fmt.Printf("body: %v\n", postBody)
+		endpoint := "http://localhost:11434/api/chat"
 
-		endpoint := "http://localhost:11434"
-		fmt.Printf("endpoint: %v\n", endpoint)
+		message := Message{
+			Role:    "user",
+			Content: postBody.Message,
+		}
+
+		request := Request{
+			Model:    "deepseek-r1:1.5b",
+			Messages: []Message{message},
+		}
+
+		jsonRequestBody, _ := json.Marshal(request)
+
+		req, _ := http.NewRequest("POST", endpoint, bytes.NewReader(jsonRequestBody))
+
+		res, _ := http.DefaultClient.Do(req)
+
+		resBytes := make([]byte, 512)
+
+		var response Response
+
+		for {
+			_, err := res.Body.Read(resBytes)
+			if err == io.EOF {
+				break
+			}
+
+			fmt.Printf("resBytes: %v\n", string(resBytes))
+
+			isValid := json.Valid(resBytes)
+			fmt.Printf("isValid: %v\n", isValid)
+			err = json.Unmarshal(resBytes, &response)
+			fmt.Printf("err: %v\n", err)
+
+			w.Write([]byte("event: datastar-merge-fragments\n"))
+			w.Write([]byte("retry: 1000\n"))
+			w.Write([]byte(fmt.Sprintf(`data: fragments <p id="messages" >%v</p>`, string(resBytes))))
+			w.Write([]byte("\n\n\n"))
+			flusher.Flush()
+		}
 
 	})
 

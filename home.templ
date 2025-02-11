@@ -18,13 +18,17 @@ templ home() {
 			<script type="module" src="https://cdn.jsdelivr.net/npm/@shoelace-style/shoelace@2.19.1/cdn/shoelace-autoloader.js"></script>
 		</head>
 		<body>
-			<div><span id="clients" data-on-load="@get('/clients')"></span></div>
-			<div id="user">
-				<input data-bind-message/>
-				<button data-on-click="@post('/chat')">submit</button>
+			<div data-signals-messages="0">
+				<p id="messages"></p>
+				<div><span id="clients" data-on-load="@get('/clients')"></span></div>
+				<p data-text="$messages"></p>
+				<div id="user">
+					<input data-bind-message/>
+					<button data-on-click="@post('/chat')">submit</button>
+				</div>
+				<input data-bind-input type="checkbox" data-on-load="@get('/checkbox')"/>
+				<button data-on-click="@post('checkbox')">send</button>
 			</div>
-			<input data-bind-input type="checkbox" data-on-load="@get('/checkbox')"/>
-			<button data-on-click="@post('checkbox')">send</button>
 		</body>
 	</html>
 }
