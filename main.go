@@ -12,8 +12,9 @@ import (
 )
 
 type Signal struct {
-	Input   bool   `json:"input"`
-	Message string `json:"message"`
+	Input    bool   `json:"input"`
+	Message  string `json:"message"`
+	Messages string `json:"messages"`
 }
 
 type Message struct {
@@ -27,20 +28,10 @@ type Request struct {
 }
 
 type Response struct {
-	Model     string    `json:"model"`
-	CreatedAt time.Time `json:"created_at"`
-	Message   struct {
-		Role    string `json:"role"`
+	Message struct {
 		Content string `json:"content"`
 	} `json:"message"`
-	DoneReason         string `json:"done_reason"`
-	Done               bool   `json:"done"`
-	TotalDuration      int    `json:"total_duration"`
-	LoadDuration       int    `json:"load_duration"`
-	PromptEvalCount    int    `json:"prompt_eval_count"`
-	PromptEvalDuration int    `json:"prompt_eval_duration"`
-	EvalCount          int    `json:"eval_count"`
-	EvalDuration       int    `json:"eval_duration"`
+	Done bool `json:"done"`
 }
 
 func main() {
@@ -149,11 +140,17 @@ func main() {
 
 		req, _ := http.NewRequest("POST", endpoint, bytes.NewReader(jsonRequestBody))
 
-		res, _ := http.DefaultClient.Do(req)
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			panic(err)
+		}
+		defer res.Body.Close()
 
 		resBytes := make([]byte, 512)
 
 		var response Response
+
+		var aiMessages string
 
 		for {
 			_, err := res.Body.Read(resBytes)
@@ -163,14 +160,41 @@ func main() {
 
 			fmt.Printf("resBytes: %v\n", string(resBytes))
 
-			isValid := json.Valid(resBytes)
-			fmt.Printf("isValid: %v\n", isValid)
-			err = json.Unmarshal(resBytes, &response)
-			fmt.Printf("err: %v\n", err)
+			trimmedResBytes := bytes.Trim(resBytes, "\x00")
+			resBytesReader := bytes.NewReader(resBytes)
+			decoder := json.NewDecoder(resBytesReader)
+			for range 100 {
+				var message string
+				tok, err := decoder.Token()
+				fmt.Printf("err: %v\n", err)
+				if err == io.EOF {
+					break
+				}
+				if tok == "" {
+					break
+				}
+				if tok == "content" {
+					decoder.Decode(&message)
+					aiMessages += message
+				}
 
-			w.Write([]byte("event: datastar-merge-fragments\n"))
+				fmt.Printf("token: %v\n", tok)
+			}
+			isValid := json.Valid(trimmedResBytes)
+			fmt.Printf("isValid: %v\n", isValid)
+			err = json.Unmarshal(trimmedResBytes, &response)
+			fmt.Printf("err: %v\n", err)
+			signal := Signal{
+				Input:    true,
+				Message:  "test",
+				Messages: aiMessages,
+			}
+
+			json, _ := json.Marshal(signal)
+
+			w.Write([]byte("event: datastar-merge-signals\n"))
 			w.Write([]byte("retry: 1000\n"))
-			w.Write([]byte(fmt.Sprintf(`data: fragments <p id="messages" >%v</p>`, string(resBytes))))
+			w.Write([]byte(fmt.Sprintf(`data: signals %v`, string(json))))
 			w.Write([]byte("\n\n\n"))
 			flusher.Flush()
 		}
@@ -184,26 +208,6 @@ func main() {
 		json.Unmarshal(body, &postBody)
 
 		checkbox <- postBody.Input
-	})
-
-	sm.HandleFunc("POST /user", func(w http.ResponseWriter, r *http.Request) {
-		body, _ := io.ReadAll(r.Body)
-
-		var signal Signal
-
-		json.Unmarshal(body, &signal)
-
-		flusher := w.(http.Flusher)
-
-		w.Header().Set("Cache-Control", "no-cache")
-		w.Header().Set("Connection", "keep-alive")
-		w.Header().Set("Content-Type", "text/event-stream")
-
-		w.Write([]byte("event: datastar-merge-fragments\n"))
-		w.Write([]byte("retry: 1000\n"))
-		w.Write([]byte("\n\n\n"))
-		flusher.Flush()
-		time.Sleep(time.Second)
 	})
 
 	clients := 0
@@ -241,7 +245,8 @@ func main() {
 		Handler: sm,
 	}
 
-	fmt.Printf("server.Addr: http://192.168.3.112%v\n", server.Addr)
+	// fmt.Printf("server.Addr: http://192.168.3.112%v\n", server.Addr)
+	fmt.Printf("server.Addr: http://192.168.0.245%v\n", server.Addr)
 
 	if err := server.ListenAndServe(); err != nil {
 		panic(err)
