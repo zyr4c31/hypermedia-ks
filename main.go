@@ -9,12 +9,22 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/skip2/go-qrcode"
 )
 
-type Signal struct {
+type SignalRequest struct {
 	Input    bool   `json:"input"`
 	Message  string `json:"message"`
 	Messages string `json:"messages"`
+}
+
+type SignalMessages struct {
+	Messages string `json:"messages"`
+}
+
+type SignalResponses struct {
+	Responses string `json:"responses"`
 }
 
 type Message struct {
@@ -27,68 +37,27 @@ type Request struct {
 	Messages []Message `json:"messages"`
 }
 
-type Response struct {
-	Message struct {
-		Content string `json:"content"`
-	} `json:"message"`
-	Done bool `json:"done"`
-}
-
 func main() {
 	sm := http.NewServeMux()
 
 	sm.HandleFunc("GET /favicon.ico", func(w http.ResponseWriter, r *http.Request) {
 		http.ServeFile(w, r, "./favicon.ico")
 	})
+	sm.HandleFunc("GET /qrcode.png", func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFile(w, r, "./qrcode.png")
+	})
 	sm.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
 		templ := home()
 		templ.Render(context.Background(), w)
 	})
 
-	var subscribers []int
-
-	sm.HandleFunc("GET /sub", func(w http.ResponseWriter, r *http.Request) {
-		for _, sub := range subscribers {
-			fmt.Printf("sub: %v\n", sub)
-		}
-	})
-
-	checkbox := make(chan bool)
-
-	sm.HandleFunc("GET /checkbox", func(w http.ResponseWriter, r *http.Request) {
-		rc := http.NewResponseController(w)
-
-		w.Header().Set("Cache-Control", "no-cache")
-		w.Header().Set("Connection", "keep-alive")
-		w.Header().Set("Content-Type", "text/event-stream")
-
-		clientGone := r.Context().Done()
-
-		for {
-			select {
-			case <-clientGone:
-				return
-			case <-checkbox:
-				for box := range checkbox {
-					w.Write([]byte("event: datastar-merge-signals\n"))
-					w.Write([]byte("retry: 1000\n"))
-					w.Write([]byte(fmt.Sprintf(`data: signals {input: %v}`, box)))
-					w.Write([]byte("\n\n\n"))
-					rc.Flush()
-				}
-			}
-		}
-	})
-
-	aiResponse := make(chan string, 1)
-	var aiMessages []string
+	var bulkMessage string
+	aiResponses := make(chan string)
 
 	sm.HandleFunc("GET /messages", func(w http.ResponseWriter, r *http.Request) {
 		flusher := w.(http.Flusher)
 
-		w.Header().Set("Cache-Control", "no-cache")
-		w.Header().Set("Connection", "keep-alive")
-		w.Header().Set("Content-Type", "text/event-stream")
+		addSSEHeaders(w)
 
 		clientGone := r.Context().Done()
 
@@ -96,31 +65,31 @@ func main() {
 			select {
 			case <-clientGone:
 				return
-			case <-aiResponse:
-				for response := range aiResponse {
-					fmt.Printf("response: %v\n", response)
-					aiMessages = append(aiMessages, response)
+			case <-aiResponses:
+				for response := range aiResponses {
+
+					responses := SignalResponses{
+						Responses: response,
+					}
+
+					responseBytes, _ := json.Marshal(responses)
 
 					w.Write([]byte("event: datastar-merge-signals\n"))
 					w.Write([]byte("retry: 1000\n"))
-					w.Write([]byte(fmt.Sprintf(`data: signals {messages: %v}`, response)))
+					w.Write([]byte(fmt.Sprintf(`data: signals %v`, string(responseBytes))))
 					w.Write([]byte("\n\n\n"))
 					flusher.Flush()
+					break
 				}
 			}
 		}
 	})
 
 	sm.HandleFunc("POST /chat", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Cache-Control", "no-cache")
-		w.Header().Set("Connection", "keep-alive")
-		w.Header().Set("Content-Type", "text/event-stream")
-
-		flusher := w.(http.Flusher)
 
 		reqBody, _ := io.ReadAll(r.Body)
 		defer r.Body.Close()
-		var postBody Signal
+		var postBody SignalRequest
 
 		json.Unmarshal(reqBody, &postBody)
 
@@ -148,66 +117,34 @@ func main() {
 
 		resBytes := make([]byte, 512)
 
-		var response Response
-
-		var aiMessages string
-
 		for {
 			_, err := res.Body.Read(resBytes)
 			if err == io.EOF {
 				break
 			}
 
-			fmt.Printf("resBytes: %v\n", string(resBytes))
-
-			trimmedResBytes := bytes.Trim(resBytes, "\x00")
 			resBytesReader := bytes.NewReader(resBytes)
 			decoder := json.NewDecoder(resBytesReader)
-			for range 100 {
+			for {
 				var message string
 				tok, err := decoder.Token()
-				fmt.Printf("err: %v\n", err)
 				if err == io.EOF {
-					break
+					return
 				}
 				if tok == "" {
-					break
+					return
 				}
 				if tok == "content" {
 					decoder.Decode(&message)
-					aiMessages += message
+					fmt.Printf("%v", message)
+
+					bulkMessage += message
+					aiResponses <- bulkMessage
+					break
 				}
-
-				fmt.Printf("token: %v\n", tok)
-			}
-			isValid := json.Valid(trimmedResBytes)
-			fmt.Printf("isValid: %v\n", isValid)
-			err = json.Unmarshal(trimmedResBytes, &response)
-			fmt.Printf("err: %v\n", err)
-			signal := Signal{
-				Input:    true,
-				Message:  "test",
-				Messages: aiMessages,
 			}
 
-			json, _ := json.Marshal(signal)
-
-			w.Write([]byte("event: datastar-merge-signals\n"))
-			w.Write([]byte("retry: 1000\n"))
-			w.Write([]byte(fmt.Sprintf(`data: signals %v`, string(json))))
-			w.Write([]byte("\n\n\n"))
-			flusher.Flush()
 		}
-
-	})
-
-	sm.HandleFunc("POST /checkbox", func(w http.ResponseWriter, r *http.Request) {
-		body, _ := io.ReadAll(r.Body)
-		defer r.Body.Close()
-		var postBody Signal
-		json.Unmarshal(body, &postBody)
-
-		checkbox <- postBody.Input
 	})
 
 	clients := 0
@@ -240,15 +177,68 @@ func main() {
 		}
 	})
 
+	checkbox := make(chan bool)
+
+	sm.HandleFunc("GET /checkbox", func(w http.ResponseWriter, r *http.Request) {
+		rc := http.NewResponseController(w)
+
+		addSSEHeaders(w)
+
+		clientGone := r.Context().Done()
+
+		for {
+			select {
+			case <-clientGone:
+				return
+			case <-checkbox:
+				for box := range checkbox {
+					w.Write([]byte("event: datastar-merge-signals\n"))
+					w.Write([]byte("retry: 1000\n"))
+					w.Write([]byte(fmt.Sprintf(`data: signals {input: %v}`, box)))
+					w.Write([]byte("\n\n\n"))
+					rc.Flush()
+				}
+			}
+		}
+	})
+
+	sm.HandleFunc("POST /checkbox", func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		defer r.Body.Close()
+		var postBody SignalRequest
+		json.Unmarshal(body, &postBody)
+
+		checkbox <- postBody.Input
+	})
+
 	server := http.Server{
 		Addr:    ":8080",
 		Handler: sm,
 	}
 
-	// fmt.Printf("server.Addr: http://192.168.3.112%v\n", server.Addr)
-	fmt.Printf("server.Addr: http://192.168.0.245%v\n", server.Addr)
+	fmt.Printf("server.Addr: http://192.168.3.112%v\n", server.Addr)
+	// fmt.Printf("server.Addr: http://192.168.0.245%v\n", server.Addr)
+
+	generateQR()
 
 	if err := server.ListenAndServe(); err != nil {
 		panic(err)
 	}
+}
+
+func generateQR() {
+	qrCode, _ := qrcode.New("http://192.168.3.112:8080", qrcode.Medium)
+	fileName := fmt.Sprintf("%v.png", "qrcode")
+	qrCode.WriteFile(256, fileName)
+	qrcode := qrCode.ToString(false)
+	fmt.Printf("%v", qrcode)
+}
+
+func addSSEHeaders(w http.ResponseWriter) {
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Content-Type", "text/event-stream")
+}
+
+func mergeSignals(w http.ResponseWriter) {
 }

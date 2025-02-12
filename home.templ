@@ -19,15 +19,24 @@ templ home() {
 			<script type="module" src="https://cdn.jsdelivr.net/npm/@shoelace-style/shoelace@2.19.1/cdn/shoelace-autoloader.js"></script>
 		</head>
 		<body>
-			<div data-signals-messages="0">
+			<div>
 				<div><span id="clients" data-on-load="@get('/clients')"></span></div>
-				<p data-text="$messages"></p>
-				<div id="user">
+				<div data-signals="{messages: '', responses: ''}">
+					<p data-on-load="@get('/messages')"></p>
+					<p id="responses"></p>
+					<p data-text="$responses"></p>
+					<p data-text="$messages"></p>
 					<input data-bind-message/>
-					<button data-on-click="@post('/chat')">submit</button>
+					<button data-on-keydown__window="evt.key === 'Enter' && @post('/chat')" data-on-click="@post('/chat')">submit</button>
 				</div>
-				<input data-bind-input type="checkbox" data-on-load="@get('/checkbox')"/>
+				<div>
+					<template>
+						<p>Reactive form controls</p>
+						<input data-bind-input type="checkbox" data-on-load="@get('/checkbox')"/>
+					</template>
+				</div>
 			</div>
+			<img src="/qrcode.png"/>
 		</body>
 	</html>
 }
