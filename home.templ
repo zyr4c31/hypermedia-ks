@@ -4,19 +4,20 @@ templ home() {
 	<html>
 		<head>
 			<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no, minimal-ui"/>
-			<script type="module" src="https://cdn.jsdelivr.net/gh/starfederation/datastar@v1.0.0-beta.1/bundles/datastar.js"></script>
+			<link rel="icon" href="assets/favicon.ico"/>
+			<script type="module" src="assets/datastar.js"></script>
 			<link
 				rel="stylesheet"
 				media="(prefers-color-scheme:light)"
-				href="https://cdn.jsdelivr.net/npm/@shoelace-style/shoelace@2.19.1/cdn/themes/light.css"
+				href="assets/light.css"
 			/>
 			<link
 				rel="stylesheet"
 				media="(prefers-color-scheme:dark)"
-				href="https://cdn.jsdelivr.net/npm/@shoelace-style/shoelace@2.19.1/cdn/themes/dark.css"
+				href="assets/dark.css"
 				onload="document.documentElement.classList.add('sl-theme-dark');"
 			/>
-			<script type="module" src="https://cdn.jsdelivr.net/npm/@shoelace-style/shoelace@2.19.1/cdn/shoelace-autoloader.js"></script>
+			<script type="module" src="assets/shoelace-autoloader.js"></script>
 		</head>
 		<body>
 			<div>
@@ -33,10 +34,10 @@ templ home() {
 					<template>
 						<p>Reactive form controls</p>
 						<input data-bind-input type="checkbox" data-on-load="@get('/checkbox')"/>
+						<img src="assets/qrcode.png"/>
 					</template>
 				</div>
 			</div>
-			<img src="/qrcode.png"/>
 		</body>
 	</html>
 }

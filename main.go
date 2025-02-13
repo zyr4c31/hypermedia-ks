@@ -39,13 +39,11 @@ type Request struct {
 
 func main() {
 	sm := http.NewServeMux()
+	fs := http.FileServer(http.Dir("assets"))
+	sp := http.StripPrefix("/assets/", fs)
 
-	sm.HandleFunc("GET /favicon.ico", func(w http.ResponseWriter, r *http.Request) {
-		http.ServeFile(w, r, "./favicon.ico")
-	})
-	sm.HandleFunc("GET /qrcode.png", func(w http.ResponseWriter, r *http.Request) {
-		http.ServeFile(w, r, "./qrcode.png")
-	})
+	sm.Handle("GET /assets/", sp)
+
 	sm.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
 		templ := home()
 		templ.Render(context.Background(), w)
@@ -228,7 +226,7 @@ func main() {
 
 func generateQR() {
 	qrCode, _ := qrcode.New("http://192.168.3.112:8080", qrcode.Medium)
-	fileName := fmt.Sprintf("%v.png", "qrcode")
+	fileName := fmt.Sprintf("assets/%v.png", "qrcode")
 	qrCode.WriteFile(256, fileName)
 	qrcode := qrCode.ToString(false)
 	fmt.Printf("%v", qrcode)
